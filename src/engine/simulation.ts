@@ -108,7 +108,14 @@ export class Simulation {
   private pendingMs = 0;
   private nextId = 1;
   private nextSeq = 1;
+  /** 有效（未撤）委托笔数：市场 / 本人 */
   private liveMkt = 0;
+  private liveMine = 0;
+  /** 本人委托总笔数（含已撤） */
+  private mineTotal = 0;
+  /** 可被背景随机撤单的委托（市场普通单 / 大单，不含诱单），支持 O(1) 随机抽取与删除 */
+  private cancellable: Order[] = [];
+  private cancellablePos = new Map<number, number>();
   private cache: { version: number; idx: DepthIndex; result: AuctionResult } | null = null;
   private fillCache: { version: number; fills: Map<number, number> } | null = null;
 
@@ -184,10 +191,14 @@ export class Simulation {
     return this.ensureCache().result;
   }
 
+  /** 有效（未撤）委托笔数 */
   get liveOrderCount(): number {
-    let n = 0;
-    for (const o of this.orders) if (!o.cancelled) n++;
-    return n;
+    return this.liveMkt + this.liveMine;
+  }
+
+  /** 本人委托总笔数（含已撤） */
+  get myOrderCount(): number {
+    return this.mineTotal;
   }
 
   getOrder(id: number): Order | undefined {
@@ -205,7 +216,11 @@ export class Simulation {
 
   private ensureCache() {
     if (this.cache && this.cache.version === this.version) return this.cache;
-    const levels = [...this.levelMap.values()].filter((l) => l.buy > 0 || l.sell > 0).sort((a, b) => a.price - b.price);
+    // 复制价位对象：委托簿之后的变化不会影响已生成的深度快照（其前缀和在构造时已固定）
+    const levels = [...this.levelMap.values()]
+      .filter((l) => l.buy > 0 || l.sell > 0)
+      .map((l) => ({ ...l }))
+      .sort((a, b) => a.price - b.price);
     const idx = new DepthIndex(levels);
     const result = computeAuction(idx, this.params);
     this.cache = { version: this.version, idx, result };
@@ -380,19 +395,14 @@ export class Simulation {
       const n = this.rng.poisson(sc.rate * act * this.intensity(u) * dt);
       for (let i = 0; i < n; i++) this.genOrder(u);
     }
-    // 可撤单阶段的随机撤单；临近 9:20 撤单显著增多
-    if (this.canCancel && sc.cancelRate > 0 && this.liveMkt > 0 && act > 0) {
+    // 可撤单阶段的随机撤单；临近 9:20 撤单显著增多。
+    // 只从“可被随机撤单”的市场委托里均匀抽取：撤单率准确，且用户自己下单不会改变随机数序列
+    if (this.canCancel && sc.cancelRate > 0 && this.cancellable.length > 0 && act > 0) {
       let rate = sc.cancelRate;
       if (this.timing.cancelDeadline - this.t < 20_000) rate *= 4;
-      const k = this.rng.poisson(this.liveMkt * rate * dt);
-      for (let i = 0; i < k; i++) {
-        for (let tries = 0; tries < 8; tries++) {
-          const o = this.orders[this.rng.int(0, this.orders.length - 1)];
-          if (!o.cancelled && o.owner === 'mkt' && o.tag !== 'spoof') {
-            this.remove(o.id);
-            break;
-          }
-        }
+      const k = this.rng.poisson(this.cancellable.length * rate * dt);
+      for (let i = 0; i < k && this.cancellable.length > 0; i++) {
+        this.remove(this.cancellable[this.rng.int(0, this.cancellable.length - 1)].id);
       }
     }
     this.rw += this.rng.gauss() * sc.rwVol * Math.sqrt(dt);
@@ -466,7 +476,16 @@ export class Simulation {
       lv.sell += qty;
       if (owner === 'me') lv.mySell += qty;
     }
-    if (owner === 'mkt') this.liveMkt++;
+    if (owner === 'mkt') {
+      this.liveMkt++;
+      if (tag !== 'spoof') {
+        this.cancellablePos.set(o.id, this.cancellable.length);
+        this.cancellable.push(o);
+      }
+    } else {
+      this.liveMine++;
+      this.mineTotal++;
+    }
     this.tape.push({ t: this.t, kind: 'new', orderId: o.id, side, price, qty, owner, tag });
     this.version++;
     return o;
@@ -488,7 +507,21 @@ export class Simulation {
       }
       if (lv.buy <= 0 && lv.sell <= 0) this.levelMap.delete(o.price);
     }
-    if (o.owner === 'mkt') this.liveMkt--;
+    if (o.owner === 'mkt') {
+      this.liveMkt--;
+      // 从可撤列表中 O(1) 删除：用最后一个元素填补空位
+      const pos = this.cancellablePos.get(o.id);
+      if (pos !== undefined) {
+        const last = this.cancellable.pop()!;
+        if (last.id !== o.id) {
+          this.cancellable[pos] = last;
+          this.cancellablePos.set(last.id, pos);
+        }
+        this.cancellablePos.delete(o.id);
+      }
+    } else {
+      this.liveMine--;
+    }
     this.tape.push({ t: this.t, kind: 'cancel', orderId: o.id, side: o.side, price: o.price, qty: o.qty, owner: o.owner, tag: o.tag });
     this.version++;
   }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_CONTROLS, Simulation, type LiveControls, type SimConfig } from './engine/simulation';
 import { HQAuctionChart } from './ui/HQAuctionChart';
 import { DepthTable } from './ui/DepthTable';
@@ -115,13 +115,16 @@ export function App() {
     setPlaying((p) => !p);
   }, []);
 
-  // 空格：播放 / 暂停
+  // 空格：播放 / 暂停（设置窗口打开时不响应）
+  const settingsOpenRef = useRef(showSettings);
+  settingsOpenRef.current = showSettings;
   useEffect(() => {
     const isTyping = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
     };
     const onKey = (e: KeyboardEvent) => {
+      if (settingsOpenRef.current) return;
       if (e.code === 'Space' && !isTyping(e)) {
         e.preventDefault();
         if (!e.repeat) togglePlay();
@@ -129,6 +132,7 @@ export function App() {
     };
     // 阻止空格在获得焦点的按钮上触发点击（避免误下单）
     const onKeyUp = (e: KeyboardEvent) => {
+      if (settingsOpenRef.current) return;
       if (e.code === 'Space' && !isTyping(e)) e.preventDefault();
     };
     window.addEventListener('keydown', onKey);
@@ -143,7 +147,14 @@ export function App() {
 
   const price = parsePrice(draft.price);
   const qty = parseQty(draft.qty);
-  const preview = price !== null && qty !== null && !sim.done ? sim.preview(draft.side, price, qty) : null;
+  // 预演只在委托簿或下单框变化时重算（播放时每秒重渲染约 25 次）
+  const version = sim.version;
+  const preview = useMemo(
+    () => (price !== null && qty !== null && !sim.done ? sim.preview(draft.side, price, qty) : null),
+    // version 变化代表委托簿 / 撮合状态变化
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sim, version, draft.side, price, qty],
+  );
 
   const submit = () => {
     if (price === null || qty === null) return toast('价格或数量无效', 'err');
@@ -177,7 +188,7 @@ export function App() {
     bump();
   };
 
-  const myCount = sim.orders.reduce((n, o) => n + (o.owner === 'me' ? 1 : 0), 0);
+  const myCount = sim.myOrderCount;
   const fr = sim.finalResult;
   const prev = sim.prevClose;
 

@@ -150,6 +150,42 @@ describe('场景', () => {
     }
   });
 
+  it('下一笔不影响参考价的单，背景行情（含随机撤单）完全不变', () => {
+    const bg = (sim: Simulation) =>
+      sim.orders.filter((o) => o.owner === 'mkt').map((o) => `${o.side}${o.price}x${o.qty}${o.cancelled ? `c${o.cancelTime}` : ''}`);
+    const a = new Simulation(cfg({ scenarioId: 'spoof', seed: 99 }));
+    const b = new Simulation(cfg({ scenarioId: 'spoof', seed: 99 }));
+    // 跌停价挂 1 手买单：远低于参考价，不改变撮合结果
+    expect(b.placeOrder('B', b.lower, 1).ok).toBe(true);
+    a.finish();
+    b.finish();
+    expect(bg(b)).toEqual(bg(a));
+    expect(b.finalResult!.price).toBe(a.finalResult!.price);
+  });
+
+  it('有效委托数、我的委托数计数准确', () => {
+    const sim = new Simulation(cfg({ scenarioId: 'balanced', seed: 5 }));
+    const a = sim.placeOrder('B', 1000, 10);
+    sim.placeOrder('S', 1001, 10);
+    if (!a.ok) throw new Error();
+    sim.jumpTo(120_000);
+    sim.cancelOrder(a.value.id);
+    const live = sim.orders.filter((o) => !o.cancelled).length;
+    expect(sim.liveOrderCount).toBe(live);
+    expect(sim.myOrderCount).toBe(2);
+  });
+
+  it('深度快照不随之后的委托变化', () => {
+    const sim = new Simulation(cfg());
+    sim.placeOrder('B', 1000, 10);
+    const d = sim.depth;
+    const before = JSON.stringify(d.levels);
+    sim.placeOrder('B', 1000, 50);
+    expect(JSON.stringify(d.levels)).toBe(before);
+    expect(d.evaluate(1000).buyGE).toBe(10);
+    expect(sim.depth.evaluate(1000).buyGE).toBe(60);
+  });
+
   it('背景活跃度为 0 时不产生新委托', () => {
     const sim = new Simulation(cfg({ scenarioId: 'balanced' }), { activity: 0, sentiment: 0 });
     const n = sim.orders.length;

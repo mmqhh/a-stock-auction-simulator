@@ -15,7 +15,7 @@
  * 再把图表画布向右延伸 EXTRA 像素、由外层 overflow:hidden 裁掉；
  * 右侧留出 STRIP 宽的涨跌幅坐标条，由叠加层自己画。
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import HQChart from 'hqchart';
 import type { Simulation, Snapshot } from '../engine/simulation';
 import { clockString } from '../engine/rules';
@@ -32,10 +32,10 @@ const STRIP = 56;
 /** 图表画布比可见区域向右多出的宽度 */
 const EXTRA = HIDDEN_MAIN + BORDER.Right - STRIP;
 
-let styleApplied = false;
-function applyStyle() {
-  if (styleApplied) return;
-  const dpr = window.devicePixelRatio || 1;
+/** 已应用样式时的设备像素比；HQChart 的字号、点大小按设备像素设置，像素比变化后要重新应用 */
+let styleDpr = 0;
+function applyStyle(dpr: number) {
+  if (styleDpr === dpr) return;
   const style = H.HQChartStyle.GetStyleConfig(H.STYLE_TYPE_ID.BLACK_ID);
   // 贴近同花顺/通达信的配色：黑底、暗红网格、白色价格线
   style.UpBarColor = COLORS.up;
@@ -59,7 +59,19 @@ function applyStyle() {
   if (style.Frame?.PercentageText) style.Frame.PercentageText.Font = `${12 * dpr}px Arial`;
   style.DisableLogo = true; // HQChart 官方样式开关：不显示图框左下角的文字标识
   H.JSChart.SetStyle(style);
-  styleApplied = true;
+  styleDpr = dpr;
+}
+
+/** 当前设备像素比；拖到缩放比例不同的显示器或调整浏览器缩放时更新 */
+function useDevicePixelRatio(): number {
+  const [dpr, setDpr] = useState(() => window.devicePixelRatio || 1);
+  useEffect(() => {
+    const mq = window.matchMedia(`(resolution: ${dpr}dppx)`);
+    const onChange = () => setDpr(window.devicePixelRatio || 1);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [dpr]);
+  return dpr;
 }
 
 /** 距竞价开始毫秒 → HHMMSS 整数 */
@@ -93,6 +105,7 @@ export function HQAuctionChart({ sim, frame }: Props) {
   const chartRef = useRef<any>(null);
   const simRef = useRef(sim);
   simRef.current = sim;
+  const dpr = useDevicePixelRatio();
 
   const symbol = sim.config.stock.rule === 'SSE' ? '600000.sh' : '000001.sz';
 
@@ -103,9 +116,12 @@ export function HQAuctionChart({ sim, frame }: Props) {
     const date = todayInt();
     const series: Snapshot[] = [...s.snapshots];
     const r = s.result;
+    // 实时点：放在“下一个快照”的时刻（落在快照网格上，不会和上一个快照同一秒），
+    // 到了那个时刻会被真正的快照替换
     const last = series[series.length - 1];
-    if (!s.done && last && s.t > last.t) {
-      series.push({ t: s.t, price: r.price, matched: r.matched, unmatched: r.unmatched, unmatchedSide: r.unmatchedSide });
+    const nextT = last ? last.t + s.snapshotMs : 0;
+    if (!s.done && last && s.t > last.t && nextT <= s.timing.duration) {
+      series.push({ t: nextT, price: r.price, matched: r.matched, unmatched: r.unmatched, unmatchedSide: r.unmatchedSide });
     }
     // 量柱坐标上限：匹配量与未匹配量分别从底/顶出发，取两者较大值
     let maxVol = 1;
@@ -276,13 +292,12 @@ export function HQAuctionChart({ sim, frame }: Props) {
     }
   };
 
-  // 创建图表（模拟会话变化时重建）
+  // 创建图表（模拟会话变化或设备像素比变化时重建，保证字号、边框与叠加层一致）
   useEffect(() => {
     const div = divRef.current;
     if (!div) return;
-    applyStyle();
+    applyStyle(dpr);
     div.innerHTML = '';
-    const dpr = window.devicePixelRatio || 1;
     const chart = H.JSChart.Init(div);
     chart.SetOption({
       Type: '分钟走势图',
@@ -294,7 +309,9 @@ export function HQAuctionChart({ sim, frame }: Props) {
       DragSelectRect: { Enable: false },
       BeforeOpen: { IsShow: true, Width: extWidthPx(div) },
       AfterClose: { IsShow: false, Width: 0 },
-      Border: { Left: BORDER.Left * dpr, Right: BORDER.Right * dpr, Top: BORDER.Top * dpr, Bottom: BORDER.Bottom * dpr },
+      // 边框用 CSS 像素：HQChart 内部（AdjustChartBorder）会再乘以设备像素比；
+      // 而 BeforeOpen.Width 不会被换算，所以 extWidthPx 返回的是设备像素
+      Border: { Left: BORDER.Left, Right: BORDER.Right, Top: BORDER.Top, Bottom: BORDER.Bottom },
       MinuteLine: { IsShowAveragePrice: false, IsDrawAreaPrice: false },
       NetworkFilter: (data: { Name: string; PreventDefault: boolean }, callback: (d: unknown) => void) => {
         data.PreventDefault = true; // 不走 HQChart 默认的网络请求
@@ -320,7 +337,7 @@ export function HQAuctionChart({ sim, frame }: Props) {
       div.innerHTML = '';
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sim]);
+  }, [sim, dpr]);
 
   // 模拟器状态变化 → 重新喂数据
   useEffect(() => {

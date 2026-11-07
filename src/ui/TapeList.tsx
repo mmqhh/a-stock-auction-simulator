@@ -51,8 +51,9 @@ export function TapeList({ sim }: Props) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((e, i) => (
-              <tr key={`${e.orderId}-${e.kind}-${i}`} className={e.owner === 'me' ? 'mine' : ''}>
+            {rows.map((e) => (
+              // 每笔委托最多一次“新增”、一次“撤单”，组合起来唯一且稳定
+              <tr key={`${e.orderId}-${e.kind}`} className={e.owner === 'me' ? 'mine' : ''}>
                 <td className="muted">{clockString(sim.timing.startClock, e.t, true)}</td>
                 <td className={e.kind === 'cancel' ? 'muted' : e.side === 'B' ? 'up' : 'down'}>
                   {e.kind === 'cancel' ? (e.side === 'B' ? '撤买' : '撤卖') : e.side === 'B' ? '委买' : '委卖'}

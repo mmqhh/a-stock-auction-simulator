@@ -13,7 +13,13 @@ const STEP_TEXT: Record<string, string> = {
   unique: '唯一满足三原则的价格',
   minImbalance: '多个价格满足三原则 → 取未成交量最小',
   midpoint: '未成交量仍相同 → 上交所取中间价',
-  nearestRef: '未成交量仍相同 → 深交所取最接近基准价',
+  nearestRef: '未成交量仍相同 → 深交所取最接近昨收的价格',
+};
+
+/** 参考价不在任何申报价位上时，虚拟行的说明（与定价依据一致） */
+const GAP_TEXT: Record<string, string> = {
+  midpoint: '（无申报，上交所中间价）',
+  nearestRef: '（无申报，最接近昨收）',
 };
 
 export function DepthTable({ sim, onPickPrice }: Props) {
@@ -111,7 +117,7 @@ export function DepthTable({ sim, onPickPrice }: Props) {
                   <tr key="gap" className="clearing-gap">
                     <td className={dirClass(r.price, prev)}>{fmtPrice(r.price)}</td>
                     <td colSpan={2} className="muted">
-                      （无申报，中间价）
+                      {(basis && GAP_TEXT[basis.step]) ?? '（无申报价位）'}
                     </td>
                     <td>{fmtVol(g.buyGE)}</td>
                     <td>{fmtVol(g.sellLE)}</td>

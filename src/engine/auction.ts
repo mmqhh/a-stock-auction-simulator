@@ -177,57 +177,86 @@ export function resultAtPrice(idx: DepthIndex, price: number, basis: PricingBasi
   };
 }
 
+/** 一段连续价格 [lo, hi]（分），段内累计买 / 累计卖相同，e 为段内任一价格的评估结果 */
+interface Segment {
+  lo: number;
+  hi: number;
+  e: PriceEval;
+}
+
+function tickCount(segs: Segment[]): number {
+  let n = 0;
+  for (const s of segs) n += s.hi - s.lo + 1;
+  return n;
+}
+
+function expandTicks(segs: Segment[]): number[] {
+  const out: number[] = [];
+  for (const s of segs) for (let p = s.lo; p <= s.hi; p++) out.push(p);
+  return out;
+}
+
 /** 计算集合竞价参考价 / 成交价 */
 export function computeAuction(levels: PriceLevel[] | DepthIndex, params: AuctionParams): AuctionResult {
   const idx = levels instanceof DepthIndex ? levels : new DepthIndex(levels);
   if (!idx.crossed) return emptyResult(idx);
 
-  // 候选价格：上交所规则明确为“申报价格”；深交所按全部最小价位（0.01 元）逐一评估
-  const prices: number[] = [];
-  if (params.rule === 'SSE') {
-    for (const lv of idx.levels) if (lv.price >= idx.minAsk && lv.price <= idx.maxBid) prices.push(lv.price);
-  } else {
-    for (let p = idx.minAsk; p <= idx.maxBid; p++) prices.push(p);
+  // 候选价格按“价格段”评估，每段内所有价格的累计买 / 累计卖完全相同：
+  //  - 上交所规则明确为“申报价格”：每个申报价位单独一段；
+  //  - 深交所按全部最小价位（0.01 元）评估：除申报价位外，相邻两个申报价位之间的空档
+  //    （没有任何申报）也是一段，段内累计量不变，只需评估一次，不必逐个 0.01 元计算。
+  const segs: Segment[] = [];
+  let prevPrice: number | null = null;
+  for (const lv of idx.levels) {
+    if (lv.price < idx.minAsk || lv.price > idx.maxBid) continue;
+    if (params.rule === 'SZSE' && prevPrice !== null && lv.price - prevPrice > 1) {
+      segs.push({ lo: prevPrice + 1, hi: lv.price - 1, e: idx.evaluate(prevPrice + 1) });
+    }
+    segs.push({ lo: lv.price, hi: lv.price, e: idx.evaluate(lv.price) });
+    prevPrice = lv.price;
   }
 
-  const evals = prices.map((p) => idx.evaluate(p));
   let maxVolume = 0;
-  for (const e of evals) if (e.volume > maxVolume) maxVolume = e.volume;
+  for (const s of segs) if (s.e.volume > maxVolume) maxVolume = s.e.volume;
   if (maxVolume === 0) return emptyResult(idx);
 
   // 原则一 + 原则二（原则三在最大成交量处自然满足：min(买, 卖) 必有一方全部成交）
-  let cands = evals.filter((e) => e.volume === maxVolume && e.feasible);
-  if (cands.length === 0) cands = evals.filter((e) => e.volume === maxVolume); // 理论上不会发生，兜底
+  let cands = segs.filter((s) => s.e.volume === maxVolume && s.e.feasible);
+  if (cands.length === 0) cands = segs.filter((s) => s.e.volume === maxVolume); // 理论上不会发生，兜底
 
   // 平局一：未成交量（累计买与累计卖之差）最小
   let minImb = Infinity;
-  for (const e of cands) minImb = Math.min(minImb, Math.abs(e.buyGE - e.sellLE));
-  const minImbCands = cands.filter((e) => Math.abs(e.buyGE - e.sellLE) === minImb);
+  for (const s of cands) minImb = Math.min(minImb, Math.abs(s.e.buyGE - s.e.sellLE));
+  const minImbCands = cands.filter((s) => Math.abs(s.e.buyGE - s.e.sellLE) === minImb);
 
+  const candCount = tickCount(cands);
+  const minImbCount = tickCount(minImbCands);
   const basis: PricingBasis = {
     maxVolume,
-    candidates: cands.map((e) => e.price),
-    minImbalanceCandidates: minImbCands.map((e) => e.price),
-    step: cands.length === 1 ? 'unique' : minImbCands.length === 1 ? 'minImbalance' : params.rule === 'SSE' ? 'midpoint' : 'nearestRef',
+    candidates: expandTicks(cands),
+    minImbalanceCandidates: expandTicks(minImbCands),
+    step: candCount === 1 ? 'unique' : minImbCount === 1 ? 'minImbalance' : params.rule === 'SSE' ? 'midpoint' : 'nearestRef',
   };
 
   let price: number;
-  if (minImbCands.length === 1) {
-    price = minImbCands[0].price;
+  if (minImbCount === 1) {
+    price = minImbCands[0].lo;
   } else if (params.rule === 'SSE') {
     // 平局二（上交所）：取中间价，四舍五入到最小价位
-    const lo = minImbCands[0].price;
-    const hi = minImbCands[minImbCands.length - 1].price;
+    const lo = minImbCands[0].lo;
+    const hi = minImbCands[minImbCands.length - 1].hi;
     price = Math.floor((lo + hi + 1) / 2);
   } else {
-    // 平局二（深交所）：取最接近基准价的价格；距离相同时取较高者
-    price = minImbCands[0].price;
-    let best = Math.abs(price - params.refPrice);
-    for (const e of minImbCands) {
-      const d = Math.abs(e.price - params.refPrice);
-      if (d < best || (d === best && e.price > price)) {
+    // 平局二（深交所）：取最接近基准价的价格；距离相同时取较高者。
+    // 每段内离基准价最近的点就是把基准价夹到段内
+    price = minImbCands[0].lo;
+    let best = Infinity;
+    for (const s of minImbCands) {
+      const p = Math.min(s.hi, Math.max(s.lo, params.refPrice));
+      const d = Math.abs(p - params.refPrice);
+      if (d < best || (d === best && p > price)) {
         best = d;
-        price = e.price;
+        price = p;
       }
     }
   }

@@ -19,7 +19,7 @@ const PAD = { l: 64, r: 20, t: 26, b: 26 };
  *  供给曲线 S(p) = 价格 ≤ p 的累计卖单（随价格升高而增加）
  *  可成交量 V(p) = min(D, S)，集合竞价价格就是使 V 最大的那个价格
  */
-export function SupplyDemandChart({ sim, frame, preview, onPickPrice }: Props) {
+export function SupplyDemandChart({ sim, preview, onPickPrice }: Props) {
   const { wrapRef, canvasRef, size, getCtx } = useCanvas();
   const [hoverX, setHoverX] = useState<number | null>(null);
   const idx = sim.depth;
@@ -177,8 +177,9 @@ export function SupplyDemandChart({ sim, frame, preview, onPickPrice }: Props) {
       ctx.fillStyle = '#fff';
       lines.forEach((l, i) => ctx.fillText(l, bx + 7, by + 12 + i * 16));
     }
+    // 只在委托簿变化（sim.version）、尺寸、悬停或预演变化时重画，播放时不再每帧整张重画
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frame, size, hoverX, preview, sim]);
+  }, [sim.version, size, hoverX, preview, sim]);
 
   const onMove = (e: MouseEvent<HTMLCanvasElement>) => setHoverX(e.clientX - e.currentTarget.getBoundingClientRect().left);
   const onClick = (e: MouseEvent<HTMLCanvasElement>) => {

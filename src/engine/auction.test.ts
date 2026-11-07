@@ -180,6 +180,54 @@ describe('集合竞价定价', () => {
   });
 });
 
+/** 深交所规则的逐价位暴力实现：从最低卖价到最高买价每 0.01 元评估一次（用于校验分段算法） */
+function szseBruteForce(idx: DepthIndex, refPrice: number) {
+  if (!idx.crossed) return { price: null as number | null, candidates: [] as number[], minImb: [] as number[] };
+  const evals = [];
+  for (let p = idx.minAsk; p <= idx.maxBid; p++) evals.push(idx.evaluate(p));
+  const maxV = Math.max(0, ...evals.map((e) => e.volume));
+  if (maxV === 0) return { price: null, candidates: [], minImb: [] };
+  let cands = evals.filter((e) => e.volume === maxV && e.feasible);
+  if (cands.length === 0) cands = evals.filter((e) => e.volume === maxV);
+  const mi = Math.min(...cands.map((e) => Math.abs(e.buyGE - e.sellLE)));
+  const minImb = cands.filter((e) => Math.abs(e.buyGE - e.sellLE) === mi);
+  let price = minImb[0].price;
+  let best = Math.abs(price - refPrice);
+  for (const e of minImb) {
+    const d = Math.abs(e.price - refPrice);
+    if (d < best || (d === best && e.price > price)) {
+      best = d;
+      price = e.price;
+    }
+  }
+  return { price, candidates: cands.map((e) => e.price), minImb: minImb.map((e) => e.price) };
+}
+
+describe('深交所分段算法与逐价位暴力计算一致', () => {
+  it('随机委托簿（含价位稀疏、价差很大的情况）', () => {
+    let s = 777;
+    const rand = () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+    for (let round = 0; round < 3000; round++) {
+      const orders: Order[] = [];
+      const n = 1 + Math.floor(rand() * 12);
+      // 有时价格分布很宽（创业板高价股），有时很窄
+      const span = rand() < 0.5 ? 40 : 4000;
+      for (let i = 0; i < n; i++) {
+        orders.push(ord(rand() < 0.5 ? 'B' : 'S', (50000 + Math.floor(rand() * span) - span / 2) / 100, 1 + Math.floor(rand() * 30)));
+      }
+      const idx = new DepthIndex(buildLevels(orders));
+      const refPrice = 50000 + Math.floor(rand() * span) - span / 2;
+      const want = szseBruteForce(idx, refPrice);
+      const got = computeAuction(idx, { rule: 'SZSE', refPrice });
+      expect(got.price).toBe(want.price);
+      if (want.price !== null) {
+        expect(got.basis!.candidates).toEqual(want.candidates);
+        expect(got.basis!.minImbalanceCandidates).toEqual(want.minImb);
+      }
+    }
+  });
+});
+
 describe('成交分配：价格优先、时间优先', () => {
   it('同价位按时间先后成交', () => {
     const a = ord('B', 10.0, 50);
