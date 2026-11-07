@@ -485,6 +485,31 @@ button:disabled {
 .q-book {
   padding: 3px 0;
 }
+/* 盘口“量 / 额”切换 */
+.unit-seg {
+  display: inline-flex;
+  margin-left: 8px;
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.unit-seg button {
+  background: none;
+  border: none;
+  color: #9a9aa4;
+  padding: 1px 8px;
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+.unit-seg button + button {
+  border-left: 1px solid var(--border2);
+}
+.unit-seg button.active {
+  background: #3a2e08;
+  color: var(--yellow);
+}
 .q-row {
   display: grid;
   grid-template-columns: 52px 1fr 1fr;

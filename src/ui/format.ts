@@ -22,10 +22,10 @@ export function fmtVol(lots: number | null | undefined): string {
   return String(Math.round(lots));
 }
 
-/** 金额（元）格式化 */
+/** 金额（元）格式化：千万级起用“亿”显示（如 1745.9 万 → 0.17亿），与主流看盘软件一致 */
 export function fmtAmount(yuan: number): string {
   const a = Math.abs(yuan);
-  if (a >= 1e8) return `${(yuan / 1e8).toFixed(2)}亿`;
+  if (a >= 1e7) return `${(yuan / 1e8).toFixed(2)}亿`;
   if (a >= 1e4) return `${(yuan / 1e4).toFixed(1)}万`;
   return yuan.toFixed(0);
 }

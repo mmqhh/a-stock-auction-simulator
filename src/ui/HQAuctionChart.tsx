@@ -123,9 +123,10 @@ export function HQAuctionChart({ sim, frame }: Props) {
     if (!s.done && last && s.t > last.t && nextT <= s.timing.duration) {
       series.push({ t: nextT, price: r.price, matched: r.matched, unmatched: r.unmatched, unmatchedSide: r.unmatchedSide });
     }
-    // 量柱坐标上限：匹配量与未匹配量分别从底/顶出发，取两者较大值
+    // 量柱坐标上限：匹配量从底部向上、未匹配量从顶部向下，两根柱子在同一时刻共用一列，
+    // 上限必须 ≥ 匹配量 + 未匹配量，否则两根柱子会重叠（HQChart 默认也是按两者之和取上限）
     let maxVol = 1;
-    for (const x of series) maxVol = Math.max(maxVol, x.matched, x.unmatched);
+    for (const x of series) maxVol = Math.max(maxVol, x.matched + x.unmatched);
     const volTop = niceCeil(maxVol * 1.05) * 100;
     const rows = series.map((x) => [
       hhmmss(s.timing.startClock, x.t),
@@ -322,6 +323,16 @@ export function HQAuctionChart({ sim, frame }: Props) {
       },
     });
     chartRef.current = chart;
+
+    // 量柱窗口固定分成上下两半：刻度线在 底 / 中 / 顶，对应竞价量 0 / 一半 / 最大值（与主流看盘软件一致）。
+    // HQChart 的竞价区量柱刻度是按这个窗口的分割线位置换算的，不固定的话中线会落在 35% 等位置
+    const volSplit = chart.JSChartContainer?.Frame?.SubFrame?.[1]?.Frame?.YSplitOperator;
+    if (volSplit) {
+      volSplit.SplitType = 1;
+      volSplit.SplitCount = 3;
+      volSplit.FixedYMaxMin = { Max: 2, Min: 0 };
+      chart.JSChartContainer.RequestMinuteData();
+    }
 
     const ro = new ResizeObserver(() => {
       chart.OnSize();

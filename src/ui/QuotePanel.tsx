@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { Simulation } from '../engine/simulation';
 import { amountOf, dirClass, fmtAmount, fmtPct, fmtPrice, fmtVol } from './format';
 
@@ -12,6 +13,20 @@ interface Row {
   /** 价格栏显示“—”（未匹配量只揭示数量，不揭示价格） */
   dash?: boolean;
   qty: number | null;
+  /** 计算金额用的价格（未匹配量按参考价计算） */
+  amountPrice?: number | null;
+}
+
+/** 盘口数量栏显示：单量（手）/ 金额（元） */
+type Unit = 'vol' | 'amt';
+const UNIT_KEY = 'quotePanel.unit';
+
+function loadUnit(): Unit {
+  try {
+    return localStorage.getItem(UNIT_KEY) === 'amt' ? 'amt' : 'vol';
+  } catch {
+    return 'vol';
+  }
 }
 
 /**
@@ -32,9 +47,11 @@ function buildRows(sim: Simulation): { sells: Row[]; buys: Row[] } {
     if (r.unmatchedSide === 'S') {
       sells[1].dash = true;
       sells[1].qty = r.unmatched;
+      sells[1].amountPrice = r.price;
     } else if (r.unmatchedSide === 'B') {
       buys[1].dash = true;
       buys[1].qty = r.unmatched;
+      buys[1].amountPrice = r.price;
     }
   } else {
     if (r.bestAsk) {
@@ -53,6 +70,20 @@ export function QuotePanel({ sim, onPickPrice }: Props) {
   const prev = sim.prevClose;
   const r = sim.result;
   const { sells, buys } = buildRows(sim);
+  const [unit, setUnit] = useState<Unit>(loadUnit);
+  const changeUnit = (u: Unit) => {
+    setUnit(u);
+    try {
+      localStorage.setItem(UNIT_KEY, u);
+    } catch {
+      /* 无痕模式等无法存储时忽略 */
+    }
+  };
+
+  /** 按当前单位格式化：单量（手）或金额（元，价格 × 手数 × 100 股） */
+  const fmtQty = (cents: number | null | undefined, lots: number) =>
+    unit === 'amt' ? fmtAmount(amountOf(cents ?? null, lots)) : fmtVol(lots);
+  const unitText = unit === 'amt' ? '元' : ' 手';
 
   const renderRow = (row: Row, isBuy: boolean) => (
     <div
@@ -62,7 +93,9 @@ export function QuotePanel({ sim, onPickPrice }: Props) {
     >
       <span className="q-label">{row.label}</span>
       <span className={`q-price ${row.dash ? 'flat' : dirClass(row.price, prev)}`}>{row.dash ? '—' : row.price !== null ? fmtPrice(row.price) : ''}</span>
-      <span className={`q-qty ${row.dash ? (isBuy ? 'up' : 'down') : 'yellow'}`}>{row.qty !== null ? fmtVol(row.qty) : ''}</span>
+      <span className={`q-qty ${row.dash ? (isBuy ? 'up' : 'down') : 'yellow'}`}>
+        {row.qty !== null ? fmtQty(row.dash ? row.amountPrice : row.price, row.qty) : ''}
+      </span>
     </div>
   );
 
@@ -70,9 +103,9 @@ export function QuotePanel({ sim, onPickPrice }: Props) {
   if (r.price === null) {
     hint = r.totalBuy === 0 || r.totalSell === 0 ? '只有单边委托，无法撮合' : '买卖价格尚未交叉，暂无参考价';
   } else if (r.unmatchedSide === 'B') {
-    hint = `买方剩余 ${fmtVol(r.unmatched)} 手未匹配（红柱），买盘占优`;
+    hint = `买方剩余 ${fmtQty(r.price, r.unmatched)}${unitText}未匹配（红柱），买盘占优`;
   } else if (r.unmatchedSide === 'S') {
-    hint = `卖方剩余 ${fmtVol(r.unmatched)} 手未匹配（绿柱），卖盘占优`;
+    hint = `卖方剩余 ${fmtQty(r.price, r.unmatched)}${unitText}未匹配（绿柱），卖盘占优`;
   } else {
     hint = '参考价上买卖恰好全部匹配';
   }
@@ -83,6 +116,14 @@ export function QuotePanel({ sim, onPickPrice }: Props) {
       <div className="panel-title">
         <span>{sim.done ? '竞价结果' : '竞价盘口'}</span>
         <span className="muted small">{sim.done ? '已撮合' : phase === 'cancelable' ? '虚拟撮合 · 可撤单' : '虚拟撮合 · 不可撤单'}</span>
+        <span className="unit-seg" title="盘口显示单量（手）或金额（元）">
+          <button className={unit === 'vol' ? 'active' : ''} onClick={() => changeUnit('vol')}>
+            量
+          </button>
+          <button className={unit === 'amt' ? 'active' : ''} onClick={() => changeUnit('amt')}>
+            额
+          </button>
+        </span>
       </div>
       <div className="q-book">
         {sells.map((row) => renderRow(row, false))}
@@ -108,10 +149,10 @@ export function QuotePanel({ sim, onPickPrice }: Props) {
           <b className="yellow">{fmtAmount(amountOf(r.price, r.matched))}</b>
         </div>
         <div>
-          <span>未匹配</span>
+          <span>{unit === 'amt' ? '未匹配额' : '未匹配'}</span>
           <b className={r.unmatchedSide === 'B' ? 'up' : r.unmatchedSide === 'S' ? 'down' : 'flat'}>
             {r.unmatchedSide === 'B' ? '买' : r.unmatchedSide === 'S' ? '卖' : ''}
-            {fmtVol(r.unmatched)}
+            {fmtQty(r.price, r.unmatched)}
           </b>
         </div>
         <div>
