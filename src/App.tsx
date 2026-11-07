@@ -267,7 +267,7 @@ export function App() {
             </div>
             <div className="tab-body">
               {tab === 'depth' && <DepthTable sim={sim} frame={frame} onPickPrice={pickPrice} />}
-              {tab === 'curve' && <SupplyDemandChart sim={sim} frame={frame} preview={preview} onPickPrice={pickPrice} />}
+              {tab === 'curve' && <SupplyDemandChart sim={sim} frame={frame} onPickPrice={pickPrice} />}
               {tab === 'tape' && <TapeList sim={sim} frame={frame} />}
               {tab === 'mine' && <MyOrders sim={sim} frame={frame} onCancel={cancel} onCancelAll={cancelAll} />}
               {tab === 'rules' && <RulesHelp />}

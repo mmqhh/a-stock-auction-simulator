@@ -1,13 +1,11 @@
 import { useEffect, useState, type MouseEvent } from 'react';
-import type { DepthIndex } from '../engine/auction';
-import type { PreviewResult, Simulation } from '../engine/simulation';
+import type { Simulation } from '../engine/simulation';
 import { COLORS, fmtPrice, fmtVol } from './format';
 import { crisp, dashedLine, useCanvas } from './useCanvas';
 
 interface Props {
   sim: Simulation;
   frame: number;
-  preview: PreviewResult | null;
   onPickPrice: (cents: number) => void;
 }
 
@@ -19,7 +17,7 @@ const PAD = { l: 64, r: 20, t: 26, b: 26 };
  *  供给曲线 S(p) = 价格 ≤ p 的累计卖单（随价格升高而增加）
  *  可成交量 V(p) = min(D, S)，集合竞价价格就是使 V 最大的那个价格
  */
-export function SupplyDemandChart({ sim, preview, onPickPrice }: Props) {
+export function SupplyDemandChart({ sim, onPickPrice }: Props) {
   const { wrapRef, canvasRef, size, getCtx } = useCanvas();
   const [hoverX, setHoverX] = useState<number | null>(null);
   const idx = sim.depth;
@@ -29,10 +27,6 @@ export function SupplyDemandChart({ sim, preview, onPickPrice }: Props) {
   // 价格范围
   const prices: number[] = [];
   if (idx.levels.length) prices.push(idx.levels[0].price, idx.levels[idx.levels.length - 1].price);
-  if (preview) {
-    const pl = preview.depth.levels;
-    if (pl.length) prices.push(pl[0].price, pl[pl.length - 1].price);
-  }
   prices.push(prev);
   let lo = Math.min(...prices);
   let hi = Math.max(...prices);
@@ -41,8 +35,7 @@ export function SupplyDemandChart({ sim, preview, onPickPrice }: Props) {
   hi = Math.min(sim.upper, hi + padTicks);
   if (hi <= lo) hi = lo + 1;
 
-  let maxQ = Math.max(1, idx.totalBuy, idx.totalSell);
-  if (preview) maxQ = Math.max(maxQ, preview.depth.totalBuy, preview.depth.totalSell);
+  const maxQ = Math.max(1, idx.totalBuy, idx.totalSell);
 
   const plotW = Math.max(10, size.w - PAD.l - PAD.r);
   const plotH = Math.max(10, size.h - PAD.t - PAD.b);
@@ -81,62 +74,54 @@ export function SupplyDemandChart({ sim, preview, onPickPrice }: Props) {
     ctx.strokeStyle = COLORS.gridStrong;
     ctx.strokeRect(crisp(PAD.l), crisp(PAD.t), Math.round(plotW), Math.round(plotH));
 
-    const drawCurves = (d: DepthIndex, dashed: boolean) => {
-      const step = Math.max(1, Math.floor((hi - lo) / (plotW * 1.5)));
-      const ptsB: [number, number][] = [];
-      const ptsS: [number, number][] = [];
-      const ptsV: [number, number][] = [];
-      for (let p = lo; p <= hi; p += step) {
-        const e = d.evaluate(p);
-        ptsB.push([xOf(p), yOf(e.buyGE)]);
-        ptsS.push([xOf(p), yOf(e.sellLE)]);
-        ptsV.push([xOf(p), yOf(e.volume)]);
-      }
-      if (!dashed) {
-        ctx.fillStyle = 'rgba(247, 208, 0, 0.16)';
-        ctx.beginPath();
-        ctx.moveTo(xOf(lo), yOf(0));
-        for (const [x, y] of ptsV) ctx.lineTo(x, y);
-        ctx.lineTo(xOf(hi), yOf(0));
-        ctx.closePath();
-        ctx.fill();
-      }
-      const stroke = (pts: [number, number][], color: string) => {
-        ctx.save();
-        ctx.strokeStyle = color;
-        ctx.lineWidth = dashed ? 1.2 : 1.6;
-        if (dashed) ctx.setLineDash([5, 3]);
-        ctx.beginPath();
-        pts.forEach(([x, y], i) => {
-          if (i === 0) ctx.moveTo(x, y);
-          else {
-            ctx.lineTo(x, pts[i - 1][1]);
-            ctx.lineTo(x, y);
-          }
-        });
-        ctx.stroke();
-        ctx.restore();
-      };
-      stroke(ptsB, dashed ? '#ff9a9a' : COLORS.up);
-      stroke(ptsS, dashed ? '#9affb8' : COLORS.down);
+    // 当前委托簿的累计买 / 累计卖曲线与可成交量区域（不再叠加“下单后”的预演曲线）
+    const step = Math.max(1, Math.floor((hi - lo) / (plotW * 1.5)));
+    const ptsB: [number, number][] = [];
+    const ptsS: [number, number][] = [];
+    const ptsV: [number, number][] = [];
+    for (let p = lo; p <= hi; p += step) {
+      const e = idx.evaluate(p);
+      ptsB.push([xOf(p), yOf(e.buyGE)]);
+      ptsS.push([xOf(p), yOf(e.sellLE)]);
+      ptsV.push([xOf(p), yOf(e.volume)]);
+    }
+    ctx.fillStyle = 'rgba(247, 208, 0, 0.16)';
+    ctx.beginPath();
+    ctx.moveTo(xOf(lo), yOf(0));
+    for (const [x, y] of ptsV) ctx.lineTo(x, y);
+    ctx.lineTo(xOf(hi), yOf(0));
+    ctx.closePath();
+    ctx.fill();
+    const stroke = (pts: [number, number][], color: string) => {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      pts.forEach(([x, y], i) => {
+        if (i === 0) ctx.moveTo(x, y);
+        else {
+          ctx.lineTo(x, pts[i - 1][1]);
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.stroke();
+      ctx.restore();
     };
-    drawCurves(idx, false);
-    if (preview) drawCurves(preview.depth, true);
+    stroke(ptsB, COLORS.up);
+    stroke(ptsS, COLORS.down);
 
     // 昨收、参考价竖线
-    const vline = (p: number, color: string, label: string, dash: number[], row: number) => {
+    // 昨收标签放在图底部、参考价标签放在顶部，两者价格接近时也不会叠在一起
+    const vline = (p: number, color: string, label: string, dash: number[], atBottom: boolean) => {
       const x = crisp(xOf(p));
       ctx.strokeStyle = color;
       dashedLine(ctx, x, PAD.t, x, PAD.t + plotH, dash);
       ctx.fillStyle = color;
       ctx.textAlign = 'center';
-      ctx.fillText(label, x, row === 0 ? PAD.t - 8 : PAD.t + plotH - 10);
+      ctx.fillText(label, x, atBottom ? PAD.t + plotH - 10 : PAD.t - 8);
     };
-    vline(prev, '#888', '昨收', [2, 2], 0);
-    if (r.price !== null) vline(r.price, '#ffffff', `参考价 ${fmtPrice(r.price)}`, [5, 3], 0);
-    if (preview && preview.result.price !== null && preview.result.price !== r.price) {
-      vline(preview.result.price, COLORS.cyan, `下单后 ${fmtPrice(preview.result.price)}`, [5, 3], 1);
-    }
+    vline(prev, '#888', '昨收', [2, 2], true);
+    if (r.price !== null) vline(r.price, '#ffffff', `参考价 ${fmtPrice(r.price)}`, [5, 3], false);
 
     // 图例
     ctx.textAlign = 'left';
@@ -145,7 +130,6 @@ export function SupplyDemandChart({ sim, preview, onPickPrice }: Props) {
       [COLORS.down, '绿线：累计卖量（要价不高于该价的卖单）'],
       [COLORS.yellow, '黄色区域：该价能成交的量'],
     ];
-    if (preview) legend.push([COLORS.cyan, '虚线：下单后的样子']);
     let lx = PAD.l + 8;
     for (const [c, t] of legend) {
       ctx.fillStyle = c;
@@ -177,9 +161,9 @@ export function SupplyDemandChart({ sim, preview, onPickPrice }: Props) {
       ctx.fillStyle = '#fff';
       lines.forEach((l, i) => ctx.fillText(l, bx + 7, by + 12 + i * 16));
     }
-    // 只在委托簿变化（sim.version）、尺寸、悬停或预演变化时重画，播放时不再每帧整张重画
+    // 只在委托簿变化（sim.version）、尺寸或悬停变化时重画，播放时不再每帧整张重画
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sim.version, size, hoverX, preview, sim]);
+  }, [sim.version, size, hoverX, sim]);
 
   const onMove = (e: MouseEvent<HTMLCanvasElement>) => setHoverX(e.clientX - e.currentTarget.getBoundingClientRect().left);
   const onClick = (e: MouseEvent<HTMLCanvasElement>) => {
