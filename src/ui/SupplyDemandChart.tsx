@@ -123,23 +123,8 @@ export function SupplyDemandChart({ sim, onPickPrice }: Props) {
     vline(prev, '#888', '昨收', [2, 2], true);
     if (r.price !== null) vline(r.price, '#ffffff', `参考价 ${fmtPrice(r.price)}`, [5, 3], false);
 
-    // 图例
-    ctx.textAlign = 'left';
-    const legend: [string, string][] = [
-      [COLORS.up, '红线：累计买量（出价不低于该价的买单）'],
-      [COLORS.down, '绿线：累计卖量（要价不高于该价的卖单）'],
-      [COLORS.yellow, '黄色区域：该价能成交的量'],
-    ];
-    let lx = PAD.l + 8;
-    for (const [c, t] of legend) {
-      ctx.fillStyle = c;
-      ctx.fillRect(lx, PAD.t + 8, 10, 3);
-      ctx.fillStyle = '#bbb';
-      ctx.fillText(t, lx + 14, PAD.t + 10);
-      lx += ctx.measureText(t).width + 30;
-    }
-
     // 悬停
+    ctx.textAlign = 'left';
     if (hoverX !== null && hoverX >= PAD.l && hoverX <= PAD.l + plotW) {
       const p = Math.min(hi, Math.max(lo, pOf(hoverX)));
       const x = crisp(xOf(p));
@@ -152,7 +137,8 @@ export function SupplyDemandChart({ sim, onPickPrice }: Props) {
         `能成交 ${fmtVol(e.volume)}  ${e.feasible ? '可作为成交价' : e.volume > 0 ? '不能作为成交价' : ''}`,
       ];
       const bw = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14;
-      const bx = x + 8 + bw > PAD.l + plotW ? x - 8 - bw : x + 8;
+      const preferredX = x + 8 + bw > PAD.l + plotW ? x - 8 - bw : x + 8;
+      const bx = Math.max(4, Math.min(preferredX, w - bw - 4));
       const by = PAD.t + 26;
       ctx.fillStyle = 'rgba(20,28,45,0.92)';
       ctx.fillRect(bx, by, bw, lines.length * 16 + 8);
@@ -172,8 +158,15 @@ export function SupplyDemandChart({ sim, onPickPrice }: Props) {
   };
 
   return (
-    <div className="sd-wrap" ref={wrapRef}>
-      <canvas ref={canvasRef} onMouseMove={onMove} onMouseLeave={() => setHoverX(null)} onClick={onClick} />
+    <div className="sd-panel">
+      <div className="sd-legend" aria-label="供需曲线图例">
+        <span title="出价不低于该价的全部买单"><i className="up" />累计买量（≥该价）</span>
+        <span title="要价不高于该价的全部卖单"><i className="down" />累计卖量（≤该价）</span>
+        <span title="买卖累计量中的较小值"><i className="yellow" />该价可成交量</span>
+      </div>
+      <div className="sd-wrap" ref={wrapRef}>
+        <canvas ref={canvasRef} onMouseMove={onMove} onMouseLeave={() => setHoverX(null)} onClick={onClick} />
+      </div>
     </div>
   );
 }

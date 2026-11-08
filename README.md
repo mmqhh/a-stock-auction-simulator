@@ -13,6 +13,7 @@ npm install
 npm run dev      # http://localhost:5173
 npm test         # 引擎、图表数据与 DOM 界面回归测试
 npm run build    # 生产构建
+npm run test:browser # 构建后运行真实 Chrome / Edge 验收（需本机已安装浏览器）
 ```
 
 ## 功能
@@ -41,7 +42,9 @@ npm run build    # 生产构建
 ## 开发与验证
 
 - `npm run build` 同时执行 TypeScript 类型检查。`npm test` 包含撮合算法、宽价差候选区间、科创板逐股成交、输入边界、全部场景及 DOM 下单流程回归。
-- `src/ui/auctionChartData.ts` 是独立的 HQChart 2.0 数据适配器。DOM 测试用它检查图表数据与盘口一致性；Canvas 实际绘制、浏览器缩放与窄屏视觉布局仍需要浏览器验收。
+- `src/ui/auctionChartData.ts` 是独立的 HQChart 2.0 数据适配器。DOM 测试检查数据一致性，Playwright 浏览器测试检查真实 Canvas 像素、视口布局、DPR 切换和完整交互。
+- `npm run test:browser` 使用本机 Chrome / Edge 的独立无头会话，在 4174 端口启动生产构建预览。包含 1600×1000、1366×768、1024×768、390×844 四种视口和 DPR 1 / 1.25 / 2；手机项是窄屏仿真。只验收 Chrome 桌面时，可在构建后运行 `npx playwright test --project=chrome-desktop`。
+- 浏览器报告写入 `.playwright-mcp/browser-report/index.html`，截图写入 `.playwright-mcp/visual-qa/final/`。可运行 `npx playwright show-report .playwright-mcp/browser-report` 查看。截图隐藏短暂提示浮层，便于检查被遮住的图表内容。最近一次结果见 [视觉验收记录](docs/visual-qa.md)。
 - HQChart 固定为 `1.1.15929`，直接引用图形模块并独立异步加载。图表包仍较大，升级时需复核内部坐标、窗口分割和销毁接口。
 - 撮合候选价格保存为区间及数量，不再按每一分钱展开大数组；引擎数量 API 的单位为股，例如 `sim.placeOrder('B', 1000, 201)` 表示以 10.00 元申报 201 股。
 

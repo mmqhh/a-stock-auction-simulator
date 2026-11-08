@@ -372,15 +372,17 @@ button:disabled {
 }
 .depth-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 18px;
+  gap: 4px 18px;
   padding: 4px 10px;
   border-bottom: 1px solid var(--border);
   background: #060609;
   flex-shrink: 0;
-  white-space: nowrap;
-  overflow: hidden;
+  white-space: normal;
 }
+.depth-head > span { min-width: 0; overflow-wrap: anywhere; }
+.depth-head .ci-toggle, .depth-head button { flex-shrink: 0; }
 .depth-table-box {
   flex: 1;
   overflow: auto;
@@ -988,6 +990,25 @@ button:disabled {
 }
 
 .rules-help a { color: var(--cyan); }
+
+.sd-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.sd-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  color: #bbb;
+  font-size: 11px;
+}
+.sd-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sd-legend i { width: 10px; height: 3px; background: currentColor; }
 
 @media (max-width: 1180px) {
   .main { overflow-y: auto; }

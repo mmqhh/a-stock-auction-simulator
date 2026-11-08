@@ -201,8 +201,24 @@ export function HQAuctionChart({ sim, frame }: Props) {
     fitText(['可撤单'], x0, xd);
     fitText(['9:20 起不可撤单', '不可撤单'], xd, x1);
 
-    // 竞价结束后标出开盘价
     const r = s.result;
+    // 9:15 仅有一个实时点时，HQChart 把点和量柱画在左边框上。
+    // 在起点内侧补画，让暂停下单的变化可见；不增加虚构的未来快照。
+    if (s.t === 0 && !s.done && r.price !== null) {
+      const x = x0 + 3 * dpr;
+      const y = Math.max(top + 3 * dpr, Math.min(f0.GetYFromData(r.price / 100), b0.BottomEx - 3 * dpr));
+      ctx.fillStyle = COLORS.priceLine;
+      ctx.beginPath();
+      ctx.arc(x, y, 2.5 * dpr, 0, Math.PI * 2);
+      ctx.fill();
+      const volTop = buildAuctionData(s).stock[0].before[0][5];
+      const volHeight = b1.BottomEx - b1.TopEx;
+      ctx.fillStyle = r.unmatchedSide === 'B' ? COLORS.up : r.unmatchedSide === 'S' ? COLORS.down : COLORS.flat;
+      const matchedHeight = volHeight * r.matched / volTop;
+      ctx.fillRect(x, b1.BottomEx - matchedHeight, 2 * dpr, matchedHeight);
+      if (r.unmatched > 0) ctx.fillRect(x, b1.TopEx, 2 * dpr, volHeight * r.unmatched / volTop);
+    }
+    // 竞价结束后标出开盘价
     if (s.done && r.price !== null) {
       const y = f0.GetYFromData(r.price / 100);
       const text = `开盘 ${fmtPrice(r.price)}`;
