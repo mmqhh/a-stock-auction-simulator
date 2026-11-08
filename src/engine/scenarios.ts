@@ -8,6 +8,7 @@ export interface ScenarioContext {
   anchor: number;
   upper: number;
   lower: number;
+  /** 单笔上限（股） */
   maxQty: number;
   duration: number;
   cancelDeadline: number;
@@ -98,7 +99,7 @@ export const SCENARIOS: Scenario[] = [
       const spoofPrice = Math.min(ctx.upper, Math.round(ctx.anchor * 1.06));
       for (let i = 0; i < 6; i++) {
         const placeAt = ctx.rng.int(10_000, 70_000);
-        const qty = Math.min(ctx.maxQty, ctx.rng.int(2000, 6000));
+        const qty = Math.min(ctx.maxQty, ctx.rng.int(2000, 6000) * 100);
         const cancelAt = ctx.cancelDeadline - ctx.rng.int(1500, 30_000);
         ctx.schedule(placeAt, () => {
           const id = ctx.place('B', spoofPrice - ctx.rng.int(0, 3), qty, 'spoof');
@@ -120,7 +121,7 @@ export const SCENARIOS: Scenario[] = [
     drift: () => 0.085,
     sentiment: () => 0.9,
     setup: (ctx) => {
-      for (let i = 0; i < 30; i++) ctx.place('B', ctx.upper, Math.min(ctx.maxQty, ctx.rng.int(3000, 9000)), 'big');
+      for (let i = 0; i < 30; i++) ctx.place('B', ctx.upper, Math.min(ctx.maxQty, ctx.rng.int(3000, 9000) * 100), 'big');
     },
   },
   {

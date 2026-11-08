@@ -13,13 +13,14 @@ export function fmtPct(cents: number | null | undefined, prev: number): string {
   return `${p > 0 ? '+' : ''}${p.toFixed(2)}%`;
 }
 
-/** 数量（手）格式化：≥1 万显示“x.xx万” */
-export function fmtVol(lots: number | null | undefined): string {
-  if (lots === null || lots === undefined) return '--';
+/** 整数股 → 手；保留零股精度，≥1 万手显示“x.xx万”。 */
+export function fmtVol(shares: number | null | undefined): string {
+  if (shares === null || shares === undefined) return '--';
+  const lots = shares / 100;
   const a = Math.abs(lots);
   if (a >= 1e8) return `${(lots / 1e8).toFixed(2)}亿`;
   if (a >= 1e4) return `${(lots / 1e4).toFixed(2)}万`;
-  return String(Math.round(lots));
+  return String(Number(lots.toFixed(2)));
 }
 
 /** 金额（元）格式化：千万级起用“亿”显示（如 1745.9 万 → 0.17亿），与主流看盘软件一致 */
@@ -30,8 +31,8 @@ export function fmtAmount(yuan: number): string {
   return yuan.toFixed(0);
 }
 
-/** 价格（分）× 数量（手）→ 金额（元） */
-export const amountOf = (cents: number | null, lots: number): number => (cents === null ? 0 : cents * lots);
+/** 价格（分）× 数量（股）÷ 100 → 金额（元） */
+export const amountOf = (cents: number | null, shares: number): number => (cents === null ? 0 : cents * shares / 100);
 
 export function dirClass(cents: number | null | undefined, prev: number): 'up' | 'down' | 'flat' {
   if (cents === null || cents === undefined) return 'flat';
@@ -42,20 +43,20 @@ export function signed(n: number, f: (x: number) => string = (x) => String(x)): 
   return n > 0 ? `+${f(n)}` : n < 0 ? `-${f(-n)}` : f(0);
 }
 
-/** 解析用户输入的价格（元）→ 分；非法返回 null */
-export function parsePrice(s: string): number | null {
+/** 精确解析两位十进制数，避免先转浮点再乘 100 丢失精度。 */
+function parseHundredths(s: string): number | null {
   const t = s.trim();
   if (!/^\d+(\.\d{0,2})?$/.test(t)) return null;
-  const v = Math.round(parseFloat(t) * 100);
-  return v > 0 ? v : null;
+  const [whole, fraction = ''] = t.split('.');
+  const v = Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+  return Number.isSafeInteger(v) && v > 0 ? v : null;
 }
 
-export function parseQty(s: string): number | null {
-  const t = s.trim();
-  if (!/^\d+$/.test(t)) return null;
-  const v = parseInt(t, 10);
-  return v > 0 ? v : null;
-}
+/** 价格输入（元）→ 整数分。 */
+export const parsePrice = parseHundredths;
+
+/** 数量输入（手）→ 整数股；板块最小数量与步长由引擎校验。 */
+export const parseQty = parseHundredths;
 
 export const COLORS = {
   bg: '#000000',

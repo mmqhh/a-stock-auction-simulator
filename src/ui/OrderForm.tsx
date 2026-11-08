@@ -1,7 +1,8 @@
 import type { KeyboardEvent } from 'react';
 import type { PreviewResult, Simulation } from '../engine/simulation';
 import type { Side } from '../engine/types';
-import { dirClass, fmtAmount, fmtPrice, fmtVol, parsePrice, parseQty, signed } from './format';
+import { normalizeQuantity } from '../engine/rules';
+import { amountOf, dirClass, fmtAmount, fmtPrice, fmtVol, parsePrice, parseQty, signed } from './format';
 
 export interface Draft {
   side: Side;
@@ -17,7 +18,7 @@ interface Props {
   onSubmit: () => void;
 }
 
-const QTY_PRESETS = [10, 100, 500, 1000, 5000];
+const QTY_PRESETS = [1000, 10000, 50000, 100000, 500000];
 
 export function OrderForm({ sim, draft, setDraft, preview, onSubmit }: Props) {
   const prev = sim.prevClose;
@@ -25,11 +26,11 @@ export function OrderForm({ sim, draft, setDraft, preview, onSubmit }: Props) {
   const qty = parseQty(draft.qty);
   const r = sim.result;
   const isBuy = draft.side === 'B';
-  const error = price === null ? '请输入有效价格（最多两位小数）' : qty === null ? '请输入有效数量（整数手）' : sim.validate(draft.side, price, qty);
+  const error = price === null ? '请输入有效价格（最多两位小数）' : qty === null ? '请输入有效数量（最多两位小数手）' : sim.validate(draft.side, price, qty);
 
   const setPrice = (cents: number) => setDraft({ ...draft, price: fmtPrice(Math.min(sim.upper, Math.max(sim.lower, cents))) });
   const bumpPrice = (d: number) => setPrice((price ?? r.price ?? prev) + d);
-  const setQty = (n: number) => setDraft({ ...draft, qty: String(Math.max(1, Math.min(sim.board.maxQty, n))) });
+  const setQty = (n: number) => setDraft({ ...draft, qty: String(normalizeQuantity(sim.board, n) / 100) });
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') onSubmit();
@@ -58,10 +59,10 @@ export function OrderForm({ sim, draft, setDraft, preview, onSubmit }: Props) {
       </div>
 
       <div className="of-field">
-        <label>价格</label>
+        <label htmlFor="order-price">价格</label>
         <div className="stepper">
           <button onClick={() => bumpPrice(-1)}>−</button>
-          <input name="price" value={draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} onKeyDown={onKey} />
+          <input id="order-price" name="price" inputMode="decimal" value={draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} onKeyDown={onKey} />
           <button onClick={() => bumpPrice(1)}>+</button>
         </div>
         <span className="unit">元</span>
@@ -80,26 +81,27 @@ export function OrderForm({ sim, draft, setDraft, preview, onSubmit }: Props) {
       </div>
 
       <div className="of-field">
-        <label>数量</label>
+        <label htmlFor="order-qty">数量</label>
         <div className="stepper">
-          <button onClick={() => setQty((qty ?? 1) - (qty && qty > 100 ? 100 : 1))}>−</button>
-          <input name="qty" value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} onKeyDown={onKey} />
-          <button onClick={() => setQty((qty ?? 0) + (qty && qty >= 100 ? 100 : 1))}>+</button>
+          <button aria-label="减少数量" onClick={() => setQty((qty ?? sim.board.minQty) - sim.board.qtyStep)}>−</button>
+          <input id="order-qty" name="qty" inputMode="decimal" value={draft.qty} onChange={(e) => setDraft({ ...draft, qty: e.target.value })} onKeyDown={onKey} />
+          <button aria-label="增加数量" onClick={() => setQty((qty ?? 0) + sim.board.qtyStep)}>+</button>
         </div>
         <span className="unit">手</span>
       </div>
       <div className="of-quick">
         {QTY_PRESETS.filter((n) => n <= sim.board.maxQty).map((n) => (
           <button key={n} onClick={() => setQty(n)}>
-            {n >= 1000 ? `${n / 1000}千` : n}
+            {n >= 100000 ? `${n / 100000}千` : n / 100}
           </button>
         ))}
         <button onClick={() => setQty(sim.board.maxQty)}>最大</button>
       </div>
       <div className="of-amount muted">
-        {price !== null && qty !== null ? `≈ ${fmtAmount(price * qty)}元 · ${qty * 100}股` : ' '}
-        <span className="right">单笔上限 {sim.board.maxQty} 手</span>
+        {price !== null && qty !== null ? `≈ ${fmtAmount(amountOf(price, qty))}元 · ${qty}股` : ' '}
+        <span className="order-limit">单笔上限 {sim.board.maxQty / 100} 手</span>
       </div>
+      <div className="muted small">{sim.board.minQty / 100} 手起，按 {sim.board.qtyStep / 100} 手递增</div>
 
       <div className="of-preview">
         <div className="of-preview-title">下单影响预演（基于当前委托簿）</div>

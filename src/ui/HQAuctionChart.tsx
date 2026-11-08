@@ -16,13 +16,15 @@
  * 右侧留出 STRIP 宽的涨跌幅坐标条，由叠加层自己画。
  */
 import { useEffect, useRef, useState } from 'react';
-import HQChart from 'hqchart';
-import type { Simulation, Snapshot } from '../engine/simulation';
+import HQChart from 'hqchart/lib/umychart.vue.js';
+import { buildAuctionData } from './auctionChartData';
+import type { Simulation } from '../engine/simulation';
 import { clockString } from '../engine/rules';
 import { COLORS, fmtPrice } from './format';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-const H = HQChart.Chart;
+// CJS 的 default 包装在开发预构建和生产构建中可能不同。
+const H = HQChart.default ?? HQChart;
 
 const BORDER = { Left: 64, Right: 64, Top: 26, Bottom: 22 };
 /** 连续竞价区（9:30–15:00）压缩后的宽度，CSS 像素，会被裁掉 */
@@ -74,25 +76,6 @@ function useDevicePixelRatio(): number {
   return dpr;
 }
 
-/** 距竞价开始毫秒 → HHMMSS 整数 */
-function hhmmss(startClock: number, t: number): number {
-  const s = startClock + Math.floor(t / 1000);
-  return Math.floor(s / 3600) * 10000 + Math.floor((s % 3600) / 60) * 100 + (s % 60);
-}
-
-function todayInt(): number {
-  const d = new Date();
-  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
-}
-
-/** 取一个“好看”的上限（1/2/2.5/5 × 10^n），使坐标刻度整齐 */
-function niceCeil(v: number): number {
-  if (v <= 0) return 1;
-  const p = Math.pow(10, Math.floor(Math.log10(v)));
-  for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
-  return 10 * p;
-}
-
 interface Props {
   sim: Simulation;
   frame: number;
@@ -108,62 +91,6 @@ export function HQAuctionChart({ sim, frame }: Props) {
   const dpr = useDevicePixelRatio();
 
   const symbol = sim.config.stock.rule === 'SSE' ? '600000.sh' : '000001.sz';
-
-  /** 模拟器状态 → HQChart 分时数据 */
-  const buildData = () => {
-    const s = simRef.current;
-    const prev = s.prevClose / 100;
-    const date = todayInt();
-    const series: Snapshot[] = [...s.snapshots];
-    const r = s.result;
-    // 实时点：放在“下一个快照”的时刻（落在快照网格上，不会和上一个快照同一秒），
-    // 到了那个时刻会被真正的快照替换
-    const last = series[series.length - 1];
-    const nextT = last ? last.t + s.snapshotMs : 0;
-    if (!s.done && last && s.t > last.t && nextT <= s.timing.duration) {
-      series.push({ t: nextT, price: r.price, matched: r.matched, unmatched: r.unmatched, unmatchedSide: r.unmatchedSide });
-    }
-    // 量柱坐标上限：匹配量从底部向上、未匹配量从顶部向下，两根柱子在同一时刻共用一列，
-    // 上限必须 ≥ 匹配量 + 未匹配量，否则两根柱子会重叠（HQChart 默认也是按两者之和取上限）
-    let maxVol = 1;
-    for (const x of series) maxVol = Math.max(maxVol, x.matched + x.unmatched);
-    const volTop = niceCeil(maxVol * 1.05) * 100;
-    const rows = series.map((x) => [
-      hhmmss(s.timing.startClock, x.t),
-      x.price === null ? null : x.price / 100,
-      x.matched * 100, // HQChart 沪深成交量单位为股，显示时自动换算为手
-      x.unmatched * 100,
-      x.unmatchedSide === 'B' ? 1 : x.unmatchedSide === 'S' ? 2 : 0,
-      volTop,
-      date,
-    ]);
-    const info = {
-      ver: 2.0,
-      totalcount: rows.length,
-      TimeConfig: {
-        AryTime: [{ Start: hhmmss(s.timing.startClock, 0), End: hhmmss(s.timing.startClock, s.timing.duration), Date: date }],
-        Step: s.config.snapshotSec,
-      },
-    };
-    const priceNow = r.price !== null ? r.price / 100 : prev;
-    const stock: Record<string, unknown> = {
-      name: s.config.stock.name,
-      symbol,
-      yclose: prev,
-      price: priceNow,
-      open: priceNow,
-      high: priceNow,
-      low: priceNow,
-      vol: 0,
-      amount: 0,
-      date,
-      time: hhmmss(s.timing.startClock, s.t),
-      minute: [],
-      before: rows,
-      beforeinfo: info,
-    };
-    return { stock: [stock], code: 0, AutoUpdate: false };
-  };
 
   const extWidthPx = (div: HTMLDivElement) => {
     const dpr = window.devicePixelRatio || 1;
@@ -317,7 +244,7 @@ export function HQAuctionChart({ sim, frame }: Props) {
       NetworkFilter: (data: { Name: string; PreventDefault: boolean }, callback: (d: unknown) => void) => {
         data.PreventDefault = true; // 不走 HQChart 默认的网络请求
         if (data.Name === 'MinuteChartContainer::RequestMinuteData') {
-          callback(buildData());
+          callback(buildAuctionData(simRef.current));
           requestAnimationFrame(drawOverlay);
         }
       },

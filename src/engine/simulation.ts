@@ -1,7 +1,7 @@
 import { allocate, computeAuction, DepthIndex, type AuctionParams } from './auction';
 import { Rng } from './rng';
-import { BOARDS, limitPrices, TIMING, type Board, type BoardInfo, type SessionTiming } from './rules';
-import { getScenario, type Scenario, type ScenarioContext } from './scenarios';
+import { BOARDS, limitPrices, MAX_PREV_CLOSE, MAX_SEED, normalizeQuantity, TIMING, validateQuantity, type Board, type BoardInfo, type SessionTiming } from './rules';
+import { getScenario, SCENARIOS, type Scenario, type ScenarioContext } from './scenarios';
 import type { AuctionResult, ExchangeRule, Order, OrderTag, Owner, PriceLevel, Side } from './types';
 
 export interface StockConfig {
@@ -67,7 +67,7 @@ export type ActionResult<T = void> = { ok: true; value: T } | { ok: false; error
 
 export interface PreviewResult {
   result: AuctionResult;
-  /** 若此刻竞价结束，这笔委托预计成交手数 */
+  /** 若此刻竞价结束，这笔委托预计成交股数 */
   fill: number;
   /** 加入这笔委托后的深度 */
   depth: DepthIndex;
@@ -76,6 +76,27 @@ export interface PreviewResult {
 const STEP_MS = 100;
 
 export const DEFAULT_CONTROLS: LiveControls = { activity: 1, sentiment: 0 };
+
+/** UI 与引擎共用配置校验；在创建委托簿前拦截非法数字。 */
+export function validateSimConfig(config: SimConfig): string | null {
+  const board = Object.hasOwn(BOARDS, config.stock.board) ? BOARDS[config.stock.board] : undefined;
+  if (!board) return '板块无效';
+  if (!board.exchanges.includes(config.stock.rule)) return '该板块不支持所选交易所';
+  if (!Number.isSafeInteger(config.stock.prevClose) || config.stock.prevClose < 1 || config.stock.prevClose > MAX_PREV_CLOSE)
+    return `昨收价须在 0.01 ~ ${MAX_PREV_CLOSE / 100} 元之间，最多两位小数`;
+  if (!Number.isSafeInteger(config.seed) || config.seed < 0 || config.seed > MAX_SEED)
+    return `随机种子须为 0 ~ ${MAX_SEED} 的整数`;
+  if (config.snapshotSec !== 1 && config.snapshotSec !== 3) return '快照间隔仅支持 1 秒或 3 秒';
+  if (!SCENARIOS.some((s) => s.id === config.scenarioId)) return '背景场景无效';
+  return null;
+}
+
+function validateControls(controls: LiveControls): void {
+  if (!Number.isFinite(controls.activity) || controls.activity < 0 || controls.activity > 3)
+    throw new RangeError('活跃度须在 0 ~ 3 之间');
+  if (!Number.isFinite(controls.sentiment) || controls.sentiment < -1 || controls.sentiment > 1)
+    throw new RangeError('多空倾向须在 -1 ~ 1 之间');
+}
 
 export class Simulation {
   readonly config: SimConfig;
@@ -120,8 +141,11 @@ export class Simulation {
   private fillCache: { version: number; fills: Map<number, number> } | null = null;
 
   constructor(config: SimConfig, controls: LiveControls = DEFAULT_CONTROLS) {
-    this.config = config;
-    this.controls = { ...controls };
+    const error = validateSimConfig(config);
+    if (error) throw new RangeError(error);
+    validateControls(controls);
+    this.config = Object.freeze({ ...config, stock: Object.freeze({ ...config.stock }) });
+    this.controls = Object.freeze({ ...controls });
     this.timing = TIMING;
     this.board = BOARDS[config.stock.board];
     const lim = limitPrices(config.stock.prevClose, this.board.limitPct);
@@ -140,7 +164,8 @@ export class Simulation {
       duration: this.timing.duration,
       cancelDeadline: this.timing.cancelDeadline,
       place: (side, price, qty, tag) => {
-        const o = this.insert(side, this.clampPrice(price), Math.min(this.board.maxQty, Math.max(1, qty)), 'mkt', tag);
+        if (this.controls.activity === 0) return null;
+        const o = this.insert(side, this.clampPrice(price), normalizeQuantity(this.board, qty), 'mkt', tag);
         return o.id;
       },
       schedule: (t, fn) => this.schedule(t, fn),
@@ -149,7 +174,7 @@ export class Simulation {
       },
     };
     this.scenario.setup?.(ctx);
-    for (let i = 0; i < this.scenario.burst; i++) this.genOrder(0);
+    if (this.controls.activity > 0) for (let i = 0; i < this.scenario.burst; i++) this.genOrder(0);
     this.runScheduled(0);
     this.recordSnapshot();
   }
@@ -232,12 +257,10 @@ export class Simulation {
   validate(side: Side, price: number, qty: number): string | null {
     if (this.done) return '集合竞价已结束，不再接受申报';
     if (side !== 'B' && side !== 'S') return '买卖方向无效';
-    if (!Number.isInteger(price) || price <= 0) return '价格无效（最小变动单位 0.01 元）';
+    if (!Number.isSafeInteger(price) || price <= 0) return '价格无效（最小变动单位 0.01 元）';
     if (price > this.upper || price < this.lower)
       return `价格超出涨跌幅限制（${(this.lower / 100).toFixed(2)} ~ ${(this.upper / 100).toFixed(2)}），属无效申报`;
-    if (!Number.isInteger(qty) || qty < 1) return '数量须为正整数手（1 手 = 100 股）';
-    if (qty > this.board.maxQty) return `单笔申报不得超过 ${this.board.maxQty} 手（${this.board.maxQty * 100} 股）`;
-    return null;
+    return validateQuantity(this.board, qty);
   }
 
   placeOrder(side: Side, price: number, qty: number): ActionResult<Order> {
@@ -309,13 +332,16 @@ export class Simulation {
   }
 
   setControls(c: Partial<LiveControls>) {
-    this.controls = { ...this.controls, ...c };
+    const next = { ...this.controls, ...c };
+    validateControls(next);
+    this.controls = Object.freeze(next);
   }
 
   // ───────────────────────── 时间推进 ─────────────────────────
 
   /** 推进模拟时间（毫秒，可为小数，内部按 100ms 步进） */
   advance(ms: number) {
+    if (!Number.isFinite(ms) || ms < 0) throw new RangeError('推进时间须为有限的非负数');
     if (this.done) return;
     this.pendingMs += ms;
     while (this.pendingMs >= STEP_MS && !this.done) {
@@ -326,6 +352,7 @@ export class Simulation {
 
   /** 快进到指定时间（距开始毫秒） */
   jumpTo(target: number) {
+    if (!Number.isFinite(target) || target < 0) throw new RangeError('目标时间须为有限的非负数');
     const end = Math.min(target, this.timing.duration);
     while (this.t < end && !this.done) this.step();
     this.pendingMs = 0;
@@ -376,7 +403,8 @@ export class Simulation {
   private runScheduled(now: number) {
     while (this.scheduled.length && this.scheduled[0].t <= now) {
       const item = this.scheduled.shift()!;
-      item.fn();
+      // 背景关闭期间到期的脚本事件跳过；恢复后不补发过期申报或撤单。
+      if (this.controls.activity > 0) item.fn();
     }
   }
 
@@ -390,6 +418,7 @@ export class Simulation {
   private generate(u: number) {
     const sc = this.scenario;
     const act = this.controls.activity;
+    if (act === 0) return;
     const dt = STEP_MS / 1000;
     if (sc.rate > 0 && act > 0) {
       const n = this.rng.poisson(sc.rate * act * this.intensity(u) * dt);
@@ -433,7 +462,7 @@ export class Simulation {
     }
     const big = rng.chance(sc.bigProb);
     const qty = big ? rng.int(300, 3000) : Math.max(1, Math.round(Math.exp(Math.log(12) + rng.gauss())));
-    this.insert(side, this.clampPrice(px), Math.min(this.board.maxQty, qty), 'mkt', big ? 'big' : 'normal');
+    this.insert(side, this.clampPrice(px), normalizeQuantity(this.board, qty * 100), 'mkt', big ? 'big' : 'normal');
   }
 
   private lastSnapshotPrice(): number | null {

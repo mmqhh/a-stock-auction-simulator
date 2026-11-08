@@ -12,9 +12,9 @@
  *   - 深交所：取买入申报累计数量与卖出申报累计数量之差最小的价格；仍相等的，
  *             取最接近前收盘价的价格（本模拟器只模拟开盘集合竞价）。
  *
- * 所有价格为“分”，所有数量为“手”。
+ * 所有价格为“分”，所有数量为整数“股”。
  */
-import type { AuctionResult, ExchangeRule, Order, PriceEval, PriceLevel, PricingBasis, Side } from './types';
+import type { AuctionResult, ExchangeRule, Order, PriceEval, PriceLevel, PriceRange, PricingBasis, Side } from './types';
 
 export interface AuctionParams {
   rule: ExchangeRule;
@@ -190,10 +190,26 @@ function tickCount(segs: Segment[]): number {
   return n;
 }
 
-function expandTicks(segs: Segment[]): number[] {
-  const out: number[] = [];
-  for (const s of segs) for (let p = s.lo; p <= s.hi; p++) out.push(p);
+function compactRanges(segs: Segment[]): PriceRange[] {
+  const out: PriceRange[] = [];
+  for (const { lo, hi } of segs) {
+    const last = out[out.length - 1];
+    if (last && lo === last.hi + 1) last.hi = hi;
+    else out.push({ lo, hi });
+  }
   return out;
+}
+
+/** 二分查找候选区间，供深度表标注使用。 */
+export function isCandidate(ranges: PriceRange[], price: number): boolean {
+  let lo = 0;
+  let hi = ranges.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (ranges[mid].hi < price) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo < ranges.length && ranges[lo].lo <= price;
 }
 
 /** 计算集合竞价参考价 / 成交价 */
@@ -233,8 +249,10 @@ export function computeAuction(levels: PriceLevel[] | DepthIndex, params: Auctio
   const minImbCount = tickCount(minImbCands);
   const basis: PricingBasis = {
     maxVolume,
-    candidates: expandTicks(cands),
-    minImbalanceCandidates: expandTicks(minImbCands),
+    candidates: compactRanges(cands),
+    candidateCount: candCount,
+    minImbalanceCandidates: compactRanges(minImbCands),
+    minImbalanceCount: minImbCount,
     step: candCount === 1 ? 'unique' : minImbCount === 1 ? 'minImbalance' : params.rule === 'SSE' ? 'midpoint' : 'nearestRef',
   };
 
@@ -265,7 +283,7 @@ export function computeAuction(levels: PriceLevel[] | DepthIndex, params: Auctio
 
 /**
  * 按“价格优先、时间优先”分配成交。
- * 返回 委托id → 成交手数（只包含成交量 > 0 的委托）。
+ * 返回 委托id → 成交股数（只包含成交量 > 0 的委托）。
  */
 export function allocate(orders: Iterable<Order>, price: number | null, matched: number): Map<number, number> {
   const fills = new Map<number, number>();

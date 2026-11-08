@@ -130,7 +130,7 @@ button:disabled {
   height: 100%;
   display: flex;
   flex-direction: column;
-  min-width: 1180px;
+  min-width: 0;
 }
 .main {
   flex: 1;
@@ -171,13 +171,14 @@ button:disabled {
 
 /* ───── 顶栏 ───── */
 .topbar {
-  height: 46px;
+  min-height: 46px;
   flex-shrink: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 14px;
   white-space: nowrap;
-  padding: 0 10px;
+  padding: 6px 10px;
   background: linear-gradient(#111118, #08080c);
   border-bottom: 1px solid var(--border2);
 }
@@ -267,6 +268,7 @@ button:disabled {
 .tb-controls {
   margin-left: auto;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
 }
@@ -686,6 +688,8 @@ button:disabled {
 }
 .of-amount {
   display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   white-space: nowrap;
   justify-content: space-between;
   margin: 6px 0 0 38px;
@@ -839,7 +843,9 @@ button:disabled {
   z-index: 100;
 }
 .modal {
-  width: 620px;
+  width: min(620px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
   background: #0e0e15;
   border: 1px solid #3a3a48;
   border-radius: 3px;
@@ -918,7 +924,7 @@ button:disabled {
   overflow: auto;
   padding: 10px 18px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
   gap: 6px 26px;
   line-height: 1.65;
   align-content: start;
@@ -972,4 +978,43 @@ button:disabled {
   top: 0;
   pointer-events: none;
   z-index: 20;
+}
+
+.chart-loading {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.rules-help a { color: var(--cyan); }
+
+@media (max-width: 1180px) {
+  .main { overflow-y: auto; }
+  .left { flex-direction: column; min-width: 0; }
+  .chart-area { width: 100%; min-height: 300px; height: 42vh; border-right: 0; border-bottom: 1px solid var(--border2); }
+  .bottom { flex: 1 0 320px; min-height: 320px; }
+  .tb-controls { margin-left: 0; }
+  .tb-stock { flex-wrap: wrap; }
+  .tb-name, .tb-code { overflow-wrap: anywhere; white-space: normal; }
+}
+
+@media (max-width: 760px) {
+  .topbar { gap: 8px 12px; }
+  .main { flex-direction: column; }
+  .left { flex: none; }
+  .chart-area { height: 360px; }
+  .bottom { flex: none; height: 380px; }
+  .right { width: 100%; overflow: visible; }
+  .tb-clock { flex-wrap: wrap; }
+  .statusbar { height: auto; min-height: 22px; flex-wrap: wrap; gap: 4px 12px; white-space: normal; padding: 4px 10px; }
+  .statusbar .ci-spacer { display: none; }
+  .toasts { top: 12px; right: 12px; left: 12px; }
+  .toast { max-width: 100%; }
+  .tabs { overflow-x: auto; flex-shrink: 0; }
+  .tabs button { flex-shrink: 0; }
+  .form-grid { grid-template-columns: 90px minmax(0, 1fr); padding: 12px; }
+  .form-grid .span3 { grid-column: span 1; }
+  .form-grid .span4 { grid-column: span 2; }
+  .scenario-desc { padding-left: 0; }
 }

@@ -80,9 +80,9 @@ export function QuotePanel({ sim, onPickPrice }: Props) {
     }
   };
 
-  /** 按当前单位格式化：单量（手）或金额（元，价格 × 手数 × 100 股） */
-  const fmtQty = (cents: number | null | undefined, lots: number) =>
-    unit === 'amt' ? fmtAmount(amountOf(cents ?? null, lots)) : fmtVol(lots);
+  /** 按当前单位格式化：输入为股数，显示手数或金额（元） */
+  const fmtQty = (cents: number | null | undefined, shares: number) =>
+    unit === 'amt' ? fmtAmount(amountOf(cents ?? null, shares)) : fmtVol(shares);
   const unitText = unit === 'amt' ? '元' : ' 手';
 
   const renderRow = (row: Row, isBuy: boolean) => (

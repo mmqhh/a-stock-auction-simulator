@@ -7,18 +7,37 @@ export interface BoardInfo {
   name: string;
   /** 涨跌幅限制（百分比整数） */
   limitPct: number;
-  /** 单笔限价申报最大数量（手） */
+  /** 单笔限价申报数量（股）；模拟器不维护持仓，不模拟零股余额卖出 */
+  minQty: number;
+  qtyStep: number;
   maxQty: number;
   /** 该板块可用的交易所 */
   exchanges: ExchangeRule[];
 }
 
 export const BOARDS: Record<Board, BoardInfo> = {
-  main: { id: 'main', name: '主板（±10%）', limitPct: 10, maxQty: 10000, exchanges: ['SSE', 'SZSE'] },
-  chinext: { id: 'chinext', name: '创业板（±20%）', limitPct: 20, maxQty: 3000, exchanges: ['SZSE'] },
-  star: { id: 'star', name: '科创板（±20%）', limitPct: 20, maxQty: 1000, exchanges: ['SSE'] },
-  st5: { id: 'st5', name: '±5% 涨跌幅（旧版主板ST规则）', limitPct: 5, maxQty: 10000, exchanges: ['SSE', 'SZSE'] },
+  main: { id: 'main', name: '主板（±10%）', limitPct: 10, minQty: 100, qtyStep: 100, maxQty: 1000000, exchanges: ['SSE', 'SZSE'] },
+  chinext: { id: 'chinext', name: '创业板（±20%）', limitPct: 20, minQty: 100, qtyStep: 100, maxQty: 300000, exchanges: ['SZSE'] },
+  star: { id: 'star', name: '科创板（±20%）', limitPct: 20, minQty: 200, qtyStep: 1, maxQty: 100000, exchanges: ['SSE'] },
+  st5: { id: 'st5', name: '±5% 涨跌幅（旧版主板ST规则）', limitPct: 5, minQty: 100, qtyStep: 100, maxQty: 1000000, exchanges: ['SSE', 'SZSE'] },
 };
+
+/** 模拟器可配置的昨收上限：10 万元（分）。 */
+export const MAX_PREV_CLOSE = 10_000_000;
+export const MAX_SEED = 0xffffffff;
+
+/** 校验普通限价委托（不含持仓余额不足最低数量时的一次性卖出）。 */
+export function validateQuantity(board: BoardInfo, shares: number): string | null {
+  if (!Number.isSafeInteger(shares) || shares <= 0) return '数量须为正整数股（最小 0.01 手）';
+  if (shares < board.minQty) return `单笔申报至少 ${board.minQty} 股（${board.minQty / 100} 手）`;
+  if (shares > board.maxQty) return `单笔申报不得超过 ${board.maxQty} 股（${board.maxQty / 100} 手）`;
+  if ((shares - board.minQty) % board.qtyStep !== 0) return `该板块申报数量须按 ${board.qtyStep} 股递增`;
+  return null;
+}
+
+export function normalizeQuantity(board: BoardInfo, shares: number): number {
+  return Math.min(board.maxQty, Math.max(board.minQty, Math.round(shares / board.qtyStep) * board.qtyStep));
+}
 
 export const RULE_NAMES: Record<ExchangeRule, string> = {
   SSE: '上交所',

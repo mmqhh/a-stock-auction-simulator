@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { allocate, buildLevels, computeAuction, DepthIndex } from './auction';
+import { allocate, buildLevels, computeAuction, DepthIndex, isCandidate } from './auction';
 import { limitPrices } from './rules';
-import type { Order, Side } from './types';
+import type { Order, PriceRange, Side } from './types';
 
 let seq = 0;
 function ord(side: Side, yuan: number, qty: number, owner: 'me' | 'mkt' = 'mkt'): Order {
@@ -20,8 +20,32 @@ function ord(side: Side, yuan: number, qty: number, owner: 'me' | 'mkt' = 'mkt')
   };
 }
 
+// 仅在小规模测试中展开区间，与逐分暴力算法对照。
+const expand = (ranges: PriceRange[]) => ranges.flatMap(({lo, hi}) => Array.from({length: hi - lo + 1}, (_, i) => lo + i));
+
 const SSE = { rule: 'SSE' as const, refPrice: 1000 };
 const SZSE = { rule: 'SZSE' as const, refPrice: 1000 };
+
+it('宽价差只保留区间，候选数量和归属仍准确', () => {
+  const idx = new DepthIndex(buildLevels([ord('B', 120000, 201), ord('S', 80000, 201)]));
+  const r = computeAuction(idx, { rule: 'SZSE', refPrice: 10000000 });
+  expect(r.price).toBe(10000000);
+  expect(r.matched).toBe(201);
+  expect(r.basis?.candidateCount).toBe(4000001);
+  expect(r.basis?.minImbalanceCount).toBe(4000001);
+  expect(r.basis?.candidates).toEqual([{ lo: 8000000, hi: 12000000 }]);
+  expect(r.basis?.minImbalanceCandidates).toEqual(r.basis?.candidates);
+  expect(isCandidate(r.basis!.candidates, 10000000)).toBe(true);
+  expect(isCandidate(r.basis!.candidates, 7999999)).toBe(false);
+  expect(isCandidate(r.basis!.candidates, 12000001)).toBe(false);
+});
+
+it('候选区间保留空档，边界归属准确', () => {
+  const ranges = [{ lo: 100, hi: 103 }, { lo: 107, hi: 107 }, { lo: 200, hi: 205 }];
+  for (const price of [100, 103, 107, 200, 205]) expect(isCandidate(ranges, price)).toBe(true);
+  for (const price of [99, 104, 106, 108, 199, 206]) expect(isCandidate(ranges, price)).toBe(false);
+  expect(isCandidate([], 100)).toBe(false);
+});
 
 describe('涨跌停价计算', () => {
   it('主板 10%', () => {
@@ -221,8 +245,8 @@ describe('深交所分段算法与逐价位暴力计算一致', () => {
       const got = computeAuction(idx, { rule: 'SZSE', refPrice });
       expect(got.price).toBe(want.price);
       if (want.price !== null) {
-        expect(got.basis!.candidates).toEqual(want.candidates);
-        expect(got.basis!.minImbalanceCandidates).toEqual(want.minImb);
+        expect(expand(got.basis!.candidates)).toEqual(want.candidates);
+        expect(expand(got.basis!.minImbalanceCandidates)).toEqual(want.minImb);
       }
     }
   });

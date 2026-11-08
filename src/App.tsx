@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_CONTROLS, Simulation, type LiveControls, type SimConfig } from './engine/simulation';
-import { HQAuctionChart } from './ui/HQAuctionChart';
 import { DepthTable } from './ui/DepthTable';
-import { fmtAmount, fmtPct, fmtPrice, fmtVol, dirClass, parsePrice, parseQty } from './ui/format';
+import { amountOf, fmtAmount, fmtPct, fmtPrice, fmtVol, dirClass, parsePrice, parseQty } from './ui/format';
 import { MarketPanel } from './ui/MarketPanel';
 import { MyOrders } from './ui/MyOrders';
 import { OrderForm, type Draft } from './ui/OrderForm';
@@ -13,6 +12,8 @@ import { SupplyDemandChart } from './ui/SupplyDemandChart';
 import { TapeList } from './ui/TapeList';
 import { TopBar } from './ui/TopBar';
 import { getScenario } from './engine/scenarios';
+
+const HQAuctionChart = lazy(() => import('./ui/HQAuctionChart').then((m) => ({ default: m.HQAuctionChart })));
 
 const DEFAULT_CONFIG: SimConfig = {
   scenarioId: 'balanced',
@@ -162,7 +163,7 @@ export function App() {
     if (res.ok) {
       const a = sim.myActions[sim.myActions.length - 1];
       toast(
-        `已报：${draft.side === 'B' ? '买入' : '卖出'} ${fmtPrice(price)} × ${qty} 手 → 参考价 ${fmtPrice(a.before.price)} → ${fmtPrice(a.after.price)}`,
+        `已报：${draft.side === 'B' ? '买入' : '卖出'} ${fmtPrice(price)} × ${fmtVol(qty)} 手 → 参考价 ${fmtPrice(a.before.price)} → ${fmtPrice(a.after.price)}`,
       );
     } else toast(res.error, 'err');
     bump();
@@ -170,7 +171,7 @@ export function App() {
 
   const cancel = (id: number) => {
     const res = sim.cancelOrder(id);
-    if (res.ok) toast(`已撤单：${res.value.side === 'B' ? '买入' : '卖出'} ${fmtPrice(res.value.price)} × ${res.value.qty} 手`);
+    if (res.ok) toast(`已撤单：${res.value.side === 'B' ? '买入' : '卖出'} ${fmtPrice(res.value.price)} × ${fmtVol(res.value.qty)} 手`);
     else toast(res.error, 'err');
     bump();
   };
@@ -215,7 +216,9 @@ export function App() {
       <div className="main">
         <div className="left">
           <div className="chart-area">
-            <HQAuctionChart sim={sim} frame={frame} />
+            <Suspense fallback={<div className="chart-loading" role="status">正在加载竞价图…</div>}>
+              <HQAuctionChart sim={sim} frame={frame} />
+            </Suspense>
             {sim.done && fr && (
               <div className="done-banner">
                 {fr.price === null ? (
@@ -229,7 +232,7 @@ export function App() {
                       成交 <b className="yellow">{fmtVol(fr.matched)}</b> 手
                     </span>
                     <span>
-                      金额 <b className="yellow">{fmtAmount(fr.price * fr.matched)}</b>
+                      金额 <b className="yellow">{fmtAmount(amountOf(fr.price, fr.matched))}</b>
                     </span>
                     <span className="muted">未成交部分进入 9:30 连续竞价</span>
                   </>

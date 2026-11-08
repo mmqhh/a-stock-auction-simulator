@@ -1,6 +1,6 @@
 import type { Simulation } from '../engine/simulation';
 import { clockString } from '../engine/rules';
-import { dirClass, fmtAmount, fmtPrice, fmtVol, signed } from './format';
+import { amountOf, dirClass, fmtAmount, fmtPrice, fmtVol, signed } from './format';
 
 interface Props {
   sim: Simulation;
@@ -33,11 +33,11 @@ export function MyOrders({ sim, onCancel, onCancelAll }: Props) {
         </span>
         <span>
           {sim.done ? '买入成交' : '预计买入成交'} <b className="up">{fmtVol(buyFilled)}</b> 手
-          {px !== null && buyFilled > 0 && <span className="muted">（{fmtAmount(px * buyFilled)}）</span>}
+          {px !== null && buyFilled > 0 && <span className="muted">（{fmtAmount(amountOf(px, buyFilled))}元）</span>}
         </span>
         <span>
           {sim.done ? '卖出成交' : '预计卖出成交'} <b className="down">{fmtVol(sellFilled)}</b> 手
-          {px !== null && sellFilled > 0 && <span className="muted">（{fmtAmount(px * sellFilled)}）</span>}
+          {px !== null && sellFilled > 0 && <span className="muted">（{fmtAmount(amountOf(px, sellFilled))}元）</span>}
         </span>
         <span className="ci-spacer" />
         <button className="btn-small" disabled={!sim.canCancel || liveMine === 0} onClick={onCancelAll}>

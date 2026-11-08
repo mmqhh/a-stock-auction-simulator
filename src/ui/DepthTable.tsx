@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Simulation } from '../engine/simulation';
 import { RULE_NAMES } from '../engine/rules';
+import { isCandidate } from '../engine/auction';
 import { dirClass, fmtPrice, fmtVol } from './format';
 
 interface Props {
@@ -28,7 +29,6 @@ export function DepthTable({ sim, onPickPrice }: Props) {
   const prev = sim.prevClose;
   const boxRef = useRef<HTMLDivElement>(null);
   const [follow, setFollow] = useState(true);
-  const candSet = new Set(r.basis?.candidates ?? []);
   const rows = [...idx.levels].reverse();
 
   // 参考价行自动滚动到中间
@@ -55,10 +55,10 @@ export function DepthTable({ sim, onPickPrice }: Props) {
               最大可成交量 <b className="yellow">{fmtVol(basis.maxVolume)}</b> 手
             </span>
             <span>
-              满足三原则的候选价 <b>{basis.candidates.length}</b> 个
-              {basis.candidates.length > 1 && (
+              满足三原则的候选价 <b>{basis.candidateCount}</b> 个
+              {basis.candidateCount > 1 && (
                 <span className="muted">
-                  （{fmtPrice(basis.candidates[0])}~{fmtPrice(basis.candidates[basis.candidates.length - 1])}）
+                  （{fmtPrice(basis.candidates[0].lo)}~{fmtPrice(basis.candidates[basis.candidates.length - 1].hi)}）
                 </span>
               )}
             </span>
@@ -95,7 +95,7 @@ export function DepthTable({ sim, onPickPrice }: Props) {
               const isClearing = r.price === lv.price;
               const gapRow =
                 !clearingOnLevel && r.price !== null && lv.price > r.price && (rows[i + 1] === undefined || rows[i + 1].price < r.price);
-              const cls = [isClearing ? 'clearing' : '', candSet.has(lv.price) ? 'cand' : '', 'clickable'].join(' ');
+              const cls = [isClearing ? 'clearing' : '', isCandidate(basis?.candidates ?? [], lv.price) ? 'cand' : '', 'clickable'].join(' ');
               const out = [
                 <tr key={lv.price} className={cls} onClick={() => onPickPrice(lv.price)}>
                   <td className={dirClass(lv.price, prev)}>{fmtPrice(lv.price)}</td>
